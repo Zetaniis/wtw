@@ -1,3 +1,5 @@
+use core::panic;
+use std::collections::HashSet;
 // use std::borrow::Borrow;
 // use std::collections::HashSet;
 use std::env;
@@ -5,7 +7,6 @@ use std::collections as coll;
 // use std::ffi::OsStr;
 use std::ffi::OsString;
 use std::fs;
-use clap::builder::ValueParserFactory;
 // use clap::ValueEnum;
 // use std::path;
 // use std::path;
@@ -32,7 +33,7 @@ enum TerminalVersion {
 fn prep_version_path_struct() -> coll::BTreeMap<TerminalVersion, OsString> {
     let local_app_data_path = env::var_os("LOCALAPPDATA")
         .expect("%LOCALAPPDATA% enviornmental variable didn't parse.");
-    println!("{}", local_app_data_path.to_str().expect("Didn't parse to &str"));
+    // println!("{}", local_app_data_path.to_str().expect("Didn't parse to &str"));
 
     // let local_app_data_path_obj = path::Path::new(&local_app_data_path);
 
@@ -52,18 +53,18 @@ fn prep_version_path_struct() -> coll::BTreeMap<TerminalVersion, OsString> {
             *path_str = build_path;
     }
 
-    for path in &term_versions_paths {
-        println!("{:?}, {}", path.0, path.1.clone().into_string().unwrap());
-    }
+    // for path in &term_versions_paths {
+    //     println!("{:?}, {}", path.0, path.1.clone().into_string().unwrap());
+    // }
 
     return term_versions_paths;
 }
 
-fn get_any_version_path (term_versions_paths : &coll::BTreeMap<TerminalVersion, OsString>) -> (TerminalVersion, OsString) {
+fn get_any_version_path_by_version (term_versions_paths : &coll::BTreeMap<TerminalVersion, OsString>) -> (TerminalVersion, OsString) {
     let mut current_term_cfg_name_path_result : Result<(TerminalVersion, OsString), &str> = Err("No windows terminal configuration found.");
 
     for file_path in term_versions_paths{
-        println!("{}", file_path.1.clone().into_string().unwrap());
+        // println!("{}", file_path.1.clone().into_string().unwrap());
         match fs::metadata(file_path.1) {
             Ok(_) => {
                 println!("Config path for {:?} version found.", file_path.0);
@@ -102,12 +103,13 @@ fn get_config_json( config_string_data : &String ) -> serde_json::Value {
 }
 
 fn update_config( config_json_data : &serde_json::Value, path_to_config : &OsString) {
-    let _ = fs::write(path_to_config, config_json_data.to_string());
+    // TODO this looks ugly split it and make sensible error handling
+    let _ = fs::write(path_to_config, & serde_json::to_string_pretty(&config_json_data).unwrap_or(serde_json::to_string(&config_json_data).unwrap()));
 }
 
-fn get_config_string_data( current_term_cfg_name_path : &(TerminalVersion, OsString) ) -> String {
-    let contents = fs::read_to_string(current_term_cfg_name_path.1.clone().into_string().unwrap())
-        .expect("Loading config file data failed.");
+fn get_config_string_data( current_term_cfg_name_path : &(TerminalVersion, OsString) ) -> Result<String, std::io::Error> {
+    let contents = fs::read_to_string(current_term_cfg_name_path.1.clone().into_string().unwrap());
+        // .expect("Loading config file data failed.");
         
     // println!("JSON contents: {}", contents);
 
@@ -117,7 +119,7 @@ fn get_config_string_data( current_term_cfg_name_path : &(TerminalVersion, OsStr
 fn change_bg_image(path_to_img : &OsString, config_json_data : &mut serde_json::Value) -> Result<(), String> {
     // TODO: this is too strict, I think. Check if this works with URIs
     if fs::metadata(path_to_img).is_err() {
-        return Err("Incorrect path. File not found.".to_string());
+        return Err("Incorrect path. Image file not found.".to_string());
     }
         // .expect("Incorrect path. File not found.");
 
@@ -125,8 +127,8 @@ fn change_bg_image(path_to_img : &OsString, config_json_data : &mut serde_json::
     return Ok(());
 }
 
-fn change_bg_image_opacity(opacity_value : i32, config_json_data : &mut serde_json::Value) -> Result<(), String> {
-    if opacity_value < 0 || opacity_value > 100 {
+fn change_bg_image_opacity(opacity_value : u8, config_json_data : &mut serde_json::Value) -> Result<(), String> {
+    if opacity_value > 100 {
         return Err(format!("Incorrect image opacity value. Correct inputs in range 0-100"));
         // panic!("Incorrect image opacity value. Correct inputs in range 0.0-1.0")
     }
@@ -160,8 +162,8 @@ fn change_bg_image_stretch_mode(stretch_mode : & String,  config_json_data : & m
     return Ok(());
 }
 
-fn change_term_opacity(opacity_value : i8,  config_json_data : &mut serde_json::Value) -> Result<(), String> {
-    if opacity_value < 0 || opacity_value > 100 {
+fn change_term_opacity(opacity_value : u8,  config_json_data : &mut serde_json::Value) -> Result<(), String> {
+    if opacity_value > 100 {
         return Err("Incorrect terminal opacity value. Correct inputs in range 0-100".to_string());
         // panic!("Incorrect terminal opacity value. Correct inputs in range 0-100")
     }
@@ -173,7 +175,7 @@ fn change_term_opacity(opacity_value : i8,  config_json_data : &mut serde_json::
 // Arg parser struct
 #[derive(Parser)]
 #[command(version, about, long_about = None, arg_required_else_help = true)]
-struct Cli {
+pub struct Cli {
     // /// Optional name to operate on
     // name: Option<String>,
 
@@ -190,34 +192,36 @@ struct Cli {
 
     /// Choose terminal version. Default will act on the first found. 
     #[arg(short, long, action = clap::ArgAction::Append)]
-    terminal_version: Option<String>,
+    pub terminal_version: Option<String>,
 
     /// Use image as background
     #[arg(short, long, value_name = "PATH_TO_IMAGE")]
-    path: Option<Option<PathBuf>>,
+    pub path: Option<Option<PathBuf>>,
+
+    // /// Choose a random image from paths inputted or a folder
+    // doesnt work for mutliple args - parses first arg and throws error
+    // #[arg(short = 'r', long, action = clap::ArgAction::Append)]
+    // random_image: Option<Vec<String>>,
 
     /// Change opacity of the image (% value)
     #[arg(short = 'o', long, action = clap::ArgAction::Append)]
-    image_opacity: Option<u8>,
+    pub image_opacity: Option<u8>,
 
     /// Change alignment type of background image (% value)
     #[arg(short, long, value_name = "ALIGNMENT_TYPE")]
-    align: Option<String>,
+    pub align: Option<String>,
 
     /// Change stretch mode of background image
     #[arg(short, long, value_name = "STRETCH_MODE")]
-    stretch: Option<String>,
+    pub stretch: Option<String>,
 
     /// Change opacity of the terminal
     #[arg(short = 'O', long, action = clap::ArgAction::Append)]
-    terminal_opacity: Option<u8>,
+    pub terminal_opacity: Option<u8>,
 
-    /// Choose a random image from paths inputted or a folder
-    #[arg(short = 'r', long, action = clap::ArgAction::Append)]
-    random_image: Option<Vec<String>>
-
-
-    // TODO perform conversion from 0-100 to 0-1 for appropriate features
+    /// Set message level
+    #[arg(short, long, action = clap::ArgAction::Count)]
+    pub message_level: u8,
 }
 
 // #[derive(Clone)]
@@ -247,21 +251,50 @@ fn main() -> Result<(), String> {
 
     let cli = Cli::parse();
 
+    // panic!("poggers");
 
-    
+    // Setting info level of messages
+    match cli.message_level {
+        0 => println!("Debug mode is off"),
+        1 => println!("Debug mode is kind of on"),
+        2 => println!("Debug mode is on"),
+        _ => println!("Wrong info level. Using normal mode."),
+    }
 
+    // Choosing terminal version
+    let string_terminal_version : coll::HashMap< &str, TerminalVersion> = coll::HashMap::from([
+        ("stable", TerminalVersion::Stable),
+        ("preview", TerminalVersion::Preview),
+        ("unpackaged", TerminalVersion::Unpackaged),
+        ("s", TerminalVersion::Stable),
+        ("p", TerminalVersion::Preview),
+        ("u", TerminalVersion::Unpackaged),
+    ]);
+
+    let terminal_version_arguments : HashSet<&str> = FromIterator::from_iter(string_terminal_version.keys().cloned());
 
     let versions_to_paths_mapping: coll::BTreeMap<TerminalVersion, OsString> = prep_version_path_struct();
 
-    let current_version_and_path= get_any_version_path(&versions_to_paths_mapping);
+    let current_version_and_path: (TerminalVersion, OsString) = match cli.terminal_version {
+        Some(v) => {
+            get_specific_version_path_by_version(&string_terminal_version.get(v.as_str())
+            .expect(format!("Wrong version. Possible arguments: {:#?}", terminal_version_arguments).as_str()),
+            &versions_to_paths_mapping)
+        },
+        None => {
+           get_any_version_path_by_version(&versions_to_paths_mapping)
+        }
+    };
 
-    // for specific version
-    // let current_version_and_path: (TerminalVersion, OsString) = get_specific_version_path_by_version(&current_term_cfg_name_path_result);
 
-    let config_string_data: String = get_config_string_data(&current_version_and_path);
+
+    let config_string_data: String = get_config_string_data(&current_version_and_path).expect("Loading config file data failed.");
 
     let mut config_json_data = get_config_json(&config_string_data);
 
+
+    // Tests
+    // TODO
 
     // println!("{:#?}", config_json_data);
 
@@ -275,13 +308,40 @@ fn main() -> Result<(), String> {
 
     // change_term_opacity(20, &mut config_json_data);
 
-
     // println!("{:#?}", config_json_data);
 
 
+    // Executing features
 
+    if cli.path.is_some() {
+        change_bg_image(&cli.path.unwrap().unwrap().into_os_string(), &mut config_json_data).unwrap();
+    };
+
+    if cli.align.is_some() {
+        change_bg_image_alignment(&cli.align.unwrap(), &mut config_json_data).unwrap();
+    }
+
+    if cli.image_opacity.is_some() {
+        // TODO test this, it could introduce bugs, 
+        change_bg_image_opacity(cli.image_opacity.unwrap(), &mut config_json_data).unwrap();
+    }
+
+    if cli.stretch.is_some() {
+        change_bg_image_stretch_mode(&cli.stretch.unwrap(), &mut config_json_data).unwrap();
+    }
+
+    if cli.terminal_opacity.is_some() {
+        change_term_opacity(cli.terminal_opacity.unwrap(), &mut config_json_data).unwrap();
+    }
+
+
+    // Saving prettified string to JSON file
     
-    // update_config(&config_json_data, &current_version_and_path.1);
+    update_config(&config_json_data, &current_version_and_path.1);
 
     Ok(())
+
+    //TODO use expects in debug mode, use custom function that only returns the expect in normal mode
+
+
 }
