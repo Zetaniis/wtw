@@ -1,21 +1,13 @@
 use core::panic;
 use std::collections::HashSet;
-// use std::borrow::Borrow;
-// use std::collections::HashSet;
 use std::env;
 use std::collections as coll;
-// use std::ffi::OsStr;
 use std::ffi::OsString;
 use std::fs;
-// use clap::ValueEnum;
-// use std::path;
-// use std::path;
-// use std::ffi;
-// use std::str::FromStr;
-// use serde_json;
 use serde_json;
 use clap::Parser;
 use std::path::PathBuf;
+use omnipath;
 
 #[derive(Ord)]
 #[derive(PartialOrd)]
@@ -118,12 +110,25 @@ fn get_config_string_data( current_term_cfg_name_path : &(TerminalVersion, OsStr
 
 fn change_bg_image(path_to_img : &OsString, config_json_data : &mut serde_json::Value) -> Result<(), String> {
     // TODO: this is too strict, I think. Check if this works with URIs
+    // Not sure what signs this allows right now. Research TODO
+
+    // println!("{:?}", path_to_img);
+    // getting absolute path
+    let abs_path_result = omnipath::sys_absolute(path_to_img.as_ref());
+    // let abs_path_result = std::fs::canonicalize(path_to_img);
+    // println!("{:?}", abs_path_result);
+
+    if abs_path_result.is_err(){
+        return Err("Incorrect path. Path doesn't exists.".to_string());
+    }
+    
+    // TODO I don't think I need this check anymore.
     if fs::metadata(path_to_img).is_err() {
         return Err("Incorrect path. Image file not found.".to_string());
     }
         // .expect("Incorrect path. File not found.");
 
-    config_json_data["profiles"]["defaults"]["backgroundImage"] = path_to_img.clone().into_string().unwrap().into();
+    config_json_data["profiles"]["defaults"]["backgroundImage"] = abs_path_result.unwrap().to_string_lossy().into();
     return Ok(());
 }
 
@@ -314,6 +319,7 @@ fn main() -> Result<(), String> {
     // Executing features
 
     if cli.path.is_some() {
+        // println!("{:?}", &cli.path.clone().unwrap().unwrap());
         change_bg_image(&cli.path.unwrap().unwrap().into_os_string(), &mut config_json_data).unwrap();
     };
 

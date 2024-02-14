@@ -5,4 +5,5 @@ edition = "2021"
 
 [dependencies]
 clap = { version = "4.5.0", features = ["cargo", "derive"] }
+omnipath = "0.1.6"
 serde_json = "1.0.113"
