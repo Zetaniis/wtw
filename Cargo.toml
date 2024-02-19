@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+anyhow = "1.0.80"
 clap = { version = "4.5.0", features = ["cargo", "derive"] }
 omnipath = "0.1.6"
 serde_json = "1.0.113"
