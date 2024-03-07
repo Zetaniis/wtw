@@ -33,6 +33,8 @@ pub struct ConfigManager {
     config_path : Option<OsString>,
 }
 
+
+
 impl ConfigManager {
 
     pub fn new() -> ConfigManager {
@@ -48,14 +50,29 @@ impl ConfigManager {
 
         let cli = Cli::parse();
 
-
         // Setting info level of messages
-        match cli.message_level {
+        match &cli.message_level {
             0 => println!("Debug mode is off"),
             1 => println!("Debug mode is kind of on"),
             2 => println!("Debug mode is on"),
             _ => println!("Wrong info level. Using normal mode."),
         }
+
+        self.handle_terminal_version(&cli.terminal_version.clone().into())?;
+
+        self.create_config_from_path(&self.config_path.clone().expect("config_path is None. It should have already data here."))?;
+
+        // Handling of arguments for features
+        self.execute_features(&cli)?;
+
+        // Saving prettified string to JSON file
+        self.update_config()?;
+
+        return Ok(());
+    }
+
+
+    fn handle_terminal_version(&mut self, terminal_version : &Option<String>) -> anyhow::Result<()> {
 
         // Choosing terminal version
         // TODO would be good to somehow merge this with aliases for arg options to have one source of truth
@@ -76,7 +93,7 @@ impl ConfigManager {
         let versions_to_paths_mapping: coll::BTreeMap<TerminalVersion, OsString> = self.prep_version_path_struct();
 
 
-        match cli.terminal_version {
+        match terminal_version {
             Some(v) => {
                 self.assign_path_and_version_for_specific_version(&string_terminal_version.get(v.as_str())
                         .expect(format!("This version doesn't exist. Possible arguments: {:#?}", terminal_version_arguments).as_str()),
@@ -87,43 +104,31 @@ impl ConfigManager {
             }
         };
 
+        return Ok(());
+    }
 
 
-        // let config_string_data: String = self.create_config_from_path(&current_version_and_path).expect("Loading config file data failed.");
-
-        // let mut config_json_data = self.create_config_from_string_data(&config_string_data);
-
-        self.create_config_from_path(&self.config_path.clone().expect("config_path is None. It should have already data here."))?;
-
-
-        // Executing features
+    fn execute_features(&mut self, cli : &Cli) -> anyhow::Result<()> {
 
         if cli.path.is_some() {
-            // println!("{:?}", &cli.path.clone().unwrap().unwrap());
-            self.change_bg_image(&cli.path.unwrap().unwrap().into_os_string())?;
+            self.change_bg_image(&cli.path.clone().unwrap().unwrap().into_os_string())?;
         };
 
         if cli.align.is_some() {
-            self.change_bg_image_alignment(&cli.align.unwrap())?;
+            self.change_bg_image_alignment(&cli.align.clone().unwrap())?;
         }
 
         if cli.image_opacity.is_some() {
-            // TODO test this, it could introduce bugs, 
-            self.change_bg_image_opacity(cli.image_opacity.unwrap())?;
+            self.change_bg_image_opacity(&cli.image_opacity.clone().unwrap())?;
         }
 
         if cli.stretch.is_some() {
-            self.change_bg_image_stretch_mode(&cli.stretch.unwrap())?;
+            self.change_bg_image_stretch_mode(&cli.stretch.clone().unwrap())?;
         }
 
         if cli.terminal_opacity.is_some() {
-            self.change_term_opacity(cli.terminal_opacity.unwrap())?;
+            self.change_term_opacity(&cli.terminal_opacity.clone().unwrap())?;
         }
-
-
-        // Saving prettified string to JSON file
-        
-        self.update_config()?;
 
         return Ok(());
     }
@@ -189,14 +194,14 @@ impl ConfigManager {
     }
 
     fn assign_path_and_version_for_any_version(&mut self, term_versions_paths : &coll::BTreeMap<TerminalVersion, OsString>) -> anyhow::Result<()> {
-        let mut current_term_cfg_name_path_result = Err(anyhow!("No windows terminal config file found."));
+        let mut path_found_result = Err(anyhow!("No windows terminal config file found."));
 
         for file_path in term_versions_paths{
             // println!("{}", file_path.1.clone().into_string().unwrap());
             match fs::metadata(file_path.1) {
                 std::result::Result::Ok(_) => {
                     println!("Config path for {:?} version found.", file_path.0);
-                    current_term_cfg_name_path_result = Ok(());
+                    path_found_result = Ok(());
                     self.terminal_version = Some(file_path.0.clone());
                     self.config_path = Some(file_path.1.clone());
                     break;
@@ -207,12 +212,11 @@ impl ConfigManager {
             }
         };
 
+        path_found_result?;
 
-        let current_term_cfg_name_path = current_term_cfg_name_path_result?;
         println!("Config file for {:?} version will be used.", self.terminal_version.clone().expect("terminal_version is None. It should already have data here."));
 
-        //TODO change names
-        return Ok(current_term_cfg_name_path);
+        return Ok(());
     }
 
     fn assign_path_and_version_for_specific_version(&mut self, version : &TerminalVersion, term_versions_paths : &coll::BTreeMap<TerminalVersion, OsString>) -> anyhow::Result<()> {
@@ -247,25 +251,37 @@ impl ConfigManager {
         // let abs_path_result = std::fs::canonicalize(path_to_img);
         // println!("{:?}", abs_path_result);
 
-        if abs_path_result.is_err(){
+        println!("{}", abs_path_result.as_ref().unwrap().as_os_str().len());
+
+        if abs_path_result.is_err() || 
+            fs::metadata( abs_path_result.as_ref().unwrap()).is_err() || 
+            abs_path_result.as_ref().unwrap().as_os_str().len() == 0 {
             return Err(anyhow!("Incorrect path. Path doesn't exist."));
         }
         
         // fs::metadata(path_to_img).expect("Incorrect path. Image file not found.");
             // return Err("Incorrect path. Image file not found.".to_string());
 
-        self.json_data.as_mut().expect("json_data is None. It should have already data here.")["profiles"]["defaults"]["backgroundImage"] = abs_path_result.unwrap().to_string_lossy().into();
+        *self.get_json_property("backgroundImage") = abs_path_result.unwrap().to_string_lossy().into();
         return Ok(());
     }
 
-    fn change_bg_image_opacity(&mut self, opacity_value : u8) -> anyhow::Result<()> {
+    fn change_bg_image_opacity(&mut self, opacity_argument : &String) -> anyhow::Result<()> {
+        let opacity_value_result  = opacity_argument.clone().parse::<u8>();
+
+        if opacity_value_result.is_err() {
+            return Err(anyhow!("Incorrect terminal opacity argument. Correct input is a number in range 0-100."));
+        }
+
+        let opacity_value = opacity_value_result.unwrap();
+
         if opacity_value > 100 {
             return Err(anyhow!("Incorrect image opacity value. Correct inputs in range 0-100"));
             // panic!("Incorrect image opacity value. Correct inputs in range 0.0-1.0")
         }
 
 
-        self.json_data.as_mut().expect("json_data is None. It should have already data here.")["profiles"]["defaults"]["backgroundImageOpacity"] = ((opacity_value as f64) / 100.0).into();
+        *self.get_json_property("backgroundImageOpacity") = ((opacity_value as f64) / 100.0).into();
         return Ok(());
     }
 
@@ -277,7 +293,7 @@ impl ConfigManager {
             // panic!("Incorrect aligment type. Possible types: {:#?}", alignment_types);
         }
 
-        self.json_data.as_mut().expect("json_data is None. It should have already data here.")["profiles"]["defaults"]["backgroundImageAlignment"] = aligment_type.clone().into();
+        *self.get_json_property("backgroundImageAlignment") = aligment_type.clone().into();
         return Ok(());
     }
 
@@ -289,21 +305,31 @@ impl ConfigManager {
             // panic!("Incorrect stretch mode. Possible types: {:#?}", stretch_modes);
         }
         
-        self.json_data.as_mut().expect("json_data is None. It should have already data here.")["profiles"]["defaults"]["backgroundImageStretchMode"] = stretch_mode.clone().into();
+        *self.get_json_property("backgroundImageStretchMode") = stretch_mode.clone().into();
         return Ok(());
     }
 
-    fn change_term_opacity(&mut self, opacity_value : u8) -> anyhow::Result<()> {
+    fn change_term_opacity(&mut self, opacity_argument : &String) -> anyhow::Result<()> {
+        let opacity_value_result  = opacity_argument.clone().parse::<u8>();
+
+        if opacity_value_result.is_err() {
+            return Err(anyhow!("Incorrect terminal opacity argument. Correct input is a number in range 0-100."));
+        }
+
+        let opacity_value = opacity_value_result.unwrap();
+
         if opacity_value > 100 {
-            return Err(anyhow!("Incorrect terminal opacity value. Correct inputs in range 0-100"));
+            return Err(anyhow!("Incorrect terminal opacity value. Correct input is a number in range 0-100."));
             // panic!("Incorrect terminal opacity value. Correct inputs in range 0-100")
         }
 
-        self.json_data.as_mut().expect("json_data is None. It should have already data here.")["profiles"]["defaults"]["opacity"] = opacity_value.into();
+        *self.get_json_property("opacity") = opacity_value.into();
         return Ok(());
     }
 
-
+    fn get_json_property(&mut self, property : &str) -> &mut serde_json::Value{
+        return &mut self.json_data.as_mut().expect("json_data is None. It should have already data here.")["profiles"]["defaults"][property];
+    }
 
 
 }
@@ -342,7 +368,7 @@ pub struct Cli {
 
     /// Change opacity of the image (% value)
     #[arg(short = 'o', long, action = clap::ArgAction::Append)]
-    pub image_opacity: Option<u8>,
+    pub image_opacity: Option<String>,
 
     /// Change alignment type of background image (% value)
     #[arg(short, long, value_name = "ALIGNMENT_TYPE")]
@@ -354,30 +380,130 @@ pub struct Cli {
 
     /// Change opacity of the terminal
     #[arg(short = 'O', long, action = clap::ArgAction::Append)]
-    pub terminal_opacity: Option<u8>,
+    pub terminal_opacity: Option<String>,
 
     /// Set message level
     #[arg(short, long, action = clap::ArgAction::Count)]
     pub message_level: u8,
 }
 
-// #[derive(Clone)]
-// struct VecStringOrString {
-//     v: Vec<String>,
-//     s: String
-// }
 
-// #[derive(Subcommand)]
-// enum Commands {
-//     /// does testing things
-//     Test {
-//         /// lists test values
-//         #[arg(short, long)]
-//         list: bool,
-//     },
-// }
+//TODO 
+// reformat feautre function to accept Resutlt<strin> and not the whole Cli class
 
-// fn prepare_arg_parser() -> Command {
 
-//     return matches;
-// }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path;
+
+    // Will use this method for inputting a path to image for now
+    fn get_path_to_test_json() -> String {
+        let mut path = path::PathBuf::new();
+        path.push(env::var_os("CARGO_MANIFEST_DIR").unwrap());
+        path.push("src");  //)  path.push(OsString::from("./src/test.json"));
+        path.push("test.json");
+        return path.to_string_lossy().into_owned();
+    }
+
+    fn get_new_test_config_manager() -> ConfigManager{
+        let mut cm = ConfigManager::new();
+        let _ = cm.handle_terminal_version(&None);
+        let _ = cm.create_config_from_path(&cm.config_path.clone().expect("config_path is None. It should have already data here."));
+        return cm;
+    }
+
+    #[test]
+    fn image_opacity_90_json_check(){
+        let mut cm = get_new_test_config_manager();
+
+        let _ = cm.change_bg_image_opacity(&"90".to_string());
+
+        assert_eq!(*cm.get_json_property("backgroundImageOpacity"), serde_json::Value::from(0.9));
+    }
+
+    #[test]
+    fn image_opacity_101_json_error(){
+        let mut cm = get_new_test_config_manager();
+
+        let res = cm.change_bg_image_opacity(&"101".to_string()).unwrap_err();
+        assert_eq!(format!("{}", res), "Incorrect image opacity value. Correct inputs in range 0-100");
+    }
+
+    #[test]
+    fn terminal_opacity_90_json_check(){
+        let mut cm = get_new_test_config_manager();
+
+        let _ = cm.change_term_opacity(&"90".to_string());
+
+        assert_eq!(*cm.get_json_property("opacity"), serde_json::Value::from(90));
+    }
+
+    #[test]
+    fn terminal_opacity_101_json_error(){
+        let mut cm = get_new_test_config_manager();
+
+        let res = cm.change_term_opacity(&"101".to_string()).unwrap_err();
+        assert_eq!(format!("{}", res), "Incorrect terminal opacity value. Correct input is a number in range 0-100.");
+    }
+    
+    #[test]
+    fn stretch_mode_uniform_json_check(){
+        let mut cm = get_new_test_config_manager();
+
+        let _ = cm.change_bg_image_stretch_mode(&"uniform".to_string());
+
+        assert_eq!(*cm.get_json_property("backgroundImageStretchMode"), serde_json::Value::from("uniform".to_string()));
+    }
+
+    #[test]
+    fn stretch_mode_bad_input_error(){
+        let mut cm = get_new_test_config_manager();
+
+        let res = cm.change_bg_image_stretch_mode(&r#"sdlfk37vjx,./;'\[]-=!@#$%^&*()`~分かる"#.to_string());
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn aligment_type_left_json_check(){
+        let mut cm = get_new_test_config_manager();
+
+        let _ = cm.change_bg_image_alignment(&"left".to_string());
+
+        assert_eq!(*cm.get_json_property("backgroundImageAlignment"), serde_json::Value::from("left".to_string()));
+    }
+
+    #[test]
+    fn alignment_type_bad_input_error(){
+        let mut cm = get_new_test_config_manager();
+
+        let res = cm.change_bg_image_alignment(&r#"sdlfk37vjx,./;'\[]-=!@#$%^&*()`~分かる"#.to_string());
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn image_path_json_check(){
+        let mut cm = get_new_test_config_manager();
+
+        let _ = cm.change_bg_image(&OsString::from(get_path_to_test_json()));
+
+        assert_eq!(*cm.get_json_property("backgroundImage"), serde_json::Value::from(get_path_to_test_json()));
+    }
+
+    #[test]
+    fn image_path_json_error(){
+        let mut cm = get_new_test_config_manager();
+
+        let res = cm.change_bg_image(&OsString::from(r#"sdlfk37vjx,./;'\[]-=!@#$%^&*()`~分かる"#));
+        assert!(res.is_err());
+    }
+
+
+
+
+    // #[test]
+    // fn update_config_for_path(){
+        
+    // }
+
+}
