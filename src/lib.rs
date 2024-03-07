@@ -4,6 +4,7 @@ use std::env;
 use std::collections as coll;
 // use std::f32::consts::E;
 use std::ffi::OsString;
+use std::fmt::format;
 use std::fs;
 use anyhow::Ok;
 // use std::ops::ControlFlow;
@@ -31,6 +32,7 @@ pub struct ConfigManager {
     json_data : Option<serde_json::Value>,
     terminal_version : Option<TerminalVersion>,
     config_path : Option<OsString>,
+    message_level : Option<u8>,
 }
 
 
@@ -38,24 +40,18 @@ pub struct ConfigManager {
 impl ConfigManager {
 
     pub fn new() -> ConfigManager {
-        ConfigManager{json_data: None, config_path: None, terminal_version: None}
+        ConfigManager{json_data: None, config_path: None, terminal_version: None, message_level: None}
     }
 
     pub fn exec(&mut self) -> anyhow::Result<()> {
 
-        // println!("Args:");
-        // for argument in env::args_os() {
-        //     println!("{argument:?}");
-        // }
-
         let cli = Cli::parse();
 
-        // Setting info level of messages
-        match &cli.message_level {
-            0 => println!("Debug mode is off"),
-            1 => println!("Debug mode is kind of on"),
-            2 => println!("Debug mode is on"),
-            _ => println!("Wrong info level. Using normal mode."),
+        self.handle_message_level(&cli.message_level.clone())?;
+
+        self.log_debug(&"Args:".to_string());
+        for argument in env::args_os() {
+            self.log_debug(&format!("{argument:?}"));
         }
 
         self.handle_terminal_version(&cli.terminal_version.clone().into())?;
@@ -68,6 +64,34 @@ impl ConfigManager {
         // Saving prettified string to JSON file
         self.update_config()?;
 
+        return Ok(());
+    }
+
+    fn handle_message_level(&mut self, message_level_opt : &Option<String>) -> Result<(), anyhow::Error>{
+        let message_level : String;
+        if message_level_opt.is_none() {
+            message_level = String::from("1");
+        }
+        else {
+            message_level = message_level_opt.clone().unwrap();
+        }
+
+        let message_level = message_level.clone().parse::<u8>();
+
+        if message_level.is_err() {
+            return Err(anyhow!("Incorrect message level. Correct input is a number in range 0-2."));
+        }
+
+
+        match &message_level.as_ref().unwrap() {
+            0 => (),
+            1 => println!("Normal message mode is on"),
+            2 => println!("Debug message mode is on"),
+            _ => println!("Wrong message level. Using normal message mode."),
+        }
+
+        self.message_level = Some(message_level.unwrap().clone());
+        self.log_debug(&format!("Message level set at: {}", &self.message_level.unwrap()));
         return Ok(());
     }
 
@@ -143,22 +167,23 @@ impl ConfigManager {
         let string_data = fs::read_to_string(current_term_cfg_path.clone().into_string().unwrap());
             // .expect("Loading config file data failed.");
             
-        // println!("JSON contents: {}", contents);
+        // self.log_debug(&format!("Loading JSON config from path. JSON contents: {}", contents));
 
         self.create_config_from_string_data(&string_data.unwrap())?;
         return Ok(());
     }
     
     fn update_config(&self) -> anyhow::Result<()> {
-        // Save prettified string data. If that can't happen, save raw string data.
+        // Save prettified string data. If that can't happen, save unformatted string data.
         let mut contents = serde_json::to_string_pretty(&self.json_data);
-        // .unwrap_or(serde_json::to_string(&self.json_data).)?;
 
         if contents.is_err() {
             contents = serde_json::to_string(&self.json_data);
         }
 
-        fs::write(&self.config_path.clone().expect("Config_path is None. It should already have data here."), &contents.unwrap())?;
+        self.log_debug(&format!("Writing json data to the file."));
+
+        fs::write(&self.config_path.clone().expect("Config_path variable is None. It should already have data here."), &contents.unwrap())?;
 
         return Ok(());
     }
@@ -166,9 +191,8 @@ impl ConfigManager {
     fn prep_version_path_struct(&self) -> coll::BTreeMap<TerminalVersion, OsString> {
         let local_app_data_path = env::var_os("LOCALAPPDATA")
             .expect("%LOCALAPPDATA% enviornmental variable didn't parse.");
-        // println!("{}", local_app_data_path.to_str().expect("Didn't parse to &str"));
 
-        // let local_app_data_path_obj = path::Path::new(&local_app_data_path);
+        self.log_debug(&format!("Env LOCALAPPDATA value: {}", local_app_data_path.to_string_lossy().into_owned()));
 
         let mut term_versions_paths : coll::BTreeMap<TerminalVersion, OsString> = coll::BTreeMap::from([
             (TerminalVersion::Stable, OsString::from(r#"\Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\settings.json"#)),
@@ -177,18 +201,16 @@ impl ConfigManager {
         ]);
 
         for (_term_ver, path_str) in term_versions_paths.iter_mut() {
-                // *path_str = path::Path::new("..")
-                //     .join(local_app_data_path.clone())
-                //     .join(&path_str).into_os_string();
-
                 let mut build_path = local_app_data_path.clone();
                 build_path.push(path_str.clone());
                 *path_str = build_path;
         }
 
-        // for path in &term_versions_paths {
-        //     println!("{:?}, {}", path.0, path.1.clone().into_string().unwrap());
-        // }
+        self.log_debug(&"List of terminal verions and paths: ".to_string());
+
+        for path in &term_versions_paths {
+            self.log_debug(&format!("Terminal version: {:?}, path: {}", path.0, path.1.clone().into_string().unwrap()));
+        }
 
         return term_versions_paths;
     }
@@ -196,11 +218,11 @@ impl ConfigManager {
     fn assign_path_and_version_for_any_version(&mut self, term_versions_paths : &coll::BTreeMap<TerminalVersion, OsString>) -> anyhow::Result<()> {
         let mut path_found_result = Err(anyhow!("No windows terminal config file found."));
 
+        // Searching for a valid path and assigning it
         for file_path in term_versions_paths{
-            // println!("{}", file_path.1.clone().into_string().unwrap());
             match fs::metadata(file_path.1) {
                 std::result::Result::Ok(_) => {
-                    println!("Config path for {:?} version found.", file_path.0);
+                    self.log_info(&format!("Config path for {:?} version found.", file_path.0));
                     path_found_result = Ok(());
                     self.terminal_version = Some(file_path.0.clone());
                     self.config_path = Some(file_path.1.clone());
@@ -214,7 +236,11 @@ impl ConfigManager {
 
         path_found_result?;
 
-        println!("Config file for {:?} version will be used.", self.terminal_version.clone().expect("terminal_version is None. It should already have data here."));
+        self.log_info(&format!("Config file for {:?} version will be used.",
+            self.terminal_version.clone().expect("terminal_version is None. It should already have data here.")));
+
+        self.log_debug(&format!("Assigned terminal version {:?} and path {}",
+            self.terminal_version.clone().unwrap(), self.config_path.clone().unwrap().to_string_lossy().into_owned()));
 
         return Ok(());
     }
@@ -226,41 +252,29 @@ impl ConfigManager {
             return Err(anyhow!("No such version found."));
         }
 
-        // let specific_path = specific_path.expect("specific_path should not be None here.");
-
-        fs::metadata(&path.expect("specific_path should not be None here."))
-            .expect("Versions to paths mapping error. A path should have been found.");
+        if fs::metadata(&path.expect("specific_path should not be None here.")).is_err() {
+            return Err(anyhow!("A path to the terminal config could not be found. No such file."));
+        }
 
         self.terminal_version = Some(version.clone());
         self.config_path = path.cloned();
+
+        self.log_debug(&format!("Assigned terminal version: {:?} and path: {}", &version, &path.unwrap().to_string_lossy().into_owned()));
             
         return Ok(());
-        // return Ok((version.clone(), specific_path.clone()));
     }
 
 
     fn change_bg_image(&mut self, path_to_img : &OsString) -> anyhow::Result<()> {
-        // TODO: this is too strict, I think. Check if this works with URIs
-        // Not sure what signs this allows right now. Research TODO
-
-        // println!("{:?}", path_to_img);
-        // Getting absolute path
         let abs_path_result = omnipath::sys_absolute(path_to_img.as_ref());
 
-        // Outputs UNC path on Windows, so discarding this
-        // let abs_path_result = std::fs::canonicalize(path_to_img);
-        // println!("{:?}", abs_path_result);
-
-        println!("{}", abs_path_result.as_ref().unwrap().as_os_str().len());
+        self.log_debug(&format!("New image path: {}", abs_path_result.as_ref().unwrap().to_string_lossy().into_owned()));
 
         if abs_path_result.is_err() || 
             fs::metadata( abs_path_result.as_ref().unwrap()).is_err() || 
             abs_path_result.as_ref().unwrap().as_os_str().len() == 0 {
             return Err(anyhow!("Incorrect path. Path doesn't exist."));
         }
-        
-        // fs::metadata(path_to_img).expect("Incorrect path. Image file not found.");
-            // return Err("Incorrect path. Image file not found.".to_string());
 
         *self.get_json_property("backgroundImage") = abs_path_result.unwrap().to_string_lossy().into();
         return Ok(());
@@ -277,7 +291,6 @@ impl ConfigManager {
 
         if opacity_value > 100 {
             return Err(anyhow!("Incorrect image opacity value. Correct inputs in range 0-100"));
-            // panic!("Incorrect image opacity value. Correct inputs in range 0.0-1.0")
         }
 
 
@@ -290,19 +303,17 @@ impl ConfigManager {
 
         if !alignment_types.contains(aligment_type.as_str()) {
             return Err(anyhow!("Incorrect aligment type. Possible types: {:#?}", alignment_types));
-            // panic!("Incorrect aligment type. Possible types: {:#?}", alignment_types);
         }
 
         *self.get_json_property("backgroundImageAlignment") = aligment_type.clone().into();
         return Ok(());
     }
 
-    fn change_bg_image_stretch_mode(&mut self, stretch_mode : & String) -> anyhow::Result<()> {
+    fn change_bg_image_stretch_mode(&mut self, stretch_mode : &String) -> anyhow::Result<()> {
         let stretch_modes = coll::HashSet::from(["none", "fill", "uniform", "uniformToFill"]);
 
         if !stretch_modes.contains(stretch_mode.as_str()) {
             return Err(anyhow!("Incorrect stretch mode. Possible types: {:#?}", stretch_modes));
-            // panic!("Incorrect stretch mode. Possible types: {:#?}", stretch_modes);
         }
         
         *self.get_json_property("backgroundImageStretchMode") = stretch_mode.clone().into();
@@ -320,7 +331,6 @@ impl ConfigManager {
 
         if opacity_value > 100 {
             return Err(anyhow!("Incorrect terminal opacity value. Correct input is a number in range 0-100."));
-            // panic!("Incorrect terminal opacity value. Correct inputs in range 0-100")
         }
 
         *self.get_json_property("opacity") = opacity_value.into();
@@ -329,6 +339,19 @@ impl ConfigManager {
 
     fn get_json_property(&mut self, property : &str) -> &mut serde_json::Value{
         return &mut self.json_data.as_mut().expect("json_data is None. It should have already data here.")["profiles"]["defaults"][property];
+    }
+
+    fn log_info(&self, message : &String){
+        if self.message_level.expect("message_level is None. It should already have value here") >= 1 {
+            println!("INFO: {}", message);
+        }
+
+    }
+
+    fn log_debug(&self, message : &String){
+        if self.message_level.expect("message_level is None. It should already have value here") >= 2 {
+            println!("DEBUG: {}", message);
+        }
     }
 
 
@@ -383,13 +406,9 @@ pub struct Cli {
     pub terminal_opacity: Option<String>,
 
     /// Set message level
-    #[arg(short, long, action = clap::ArgAction::Count)]
-    pub message_level: u8,
+    #[arg(short, long, value_name = "LEVEL_VALUE")]
+    pub message_level:  Option<String>,
 }
-
-
-//TODO 
-// reformat feautre function to accept Resutlt<strin> and not the whole Cli class
 
 
 #[cfg(test)]
@@ -408,6 +427,7 @@ mod tests {
 
     fn get_new_test_config_manager() -> ConfigManager{
         let mut cm = ConfigManager::new();
+        let _ = cm.handle_message_level(&None);
         let _ = cm.handle_terminal_version(&None);
         let _ = cm.create_config_from_path(&cm.config_path.clone().expect("config_path is None. It should have already data here."));
         return cm;
