@@ -1,18 +1,16 @@
-// use core::panic;
 use std::collections::HashSet;
 use std::env;
 use std::collections as coll;
-// use std::f32::consts::E;
 use std::ffi::OsString;
-use std::fmt::format;
 use std::fs;
+
 use anyhow::Ok;
-// use std::ops::ControlFlow;
 use serde_json;
 use clap::Parser;
 use std::path::PathBuf;
 use omnipath;
 use anyhow::anyhow;
+
 
 #[derive(Ord)]
 #[derive(PartialOrd)]
@@ -34,8 +32,6 @@ pub struct ConfigManager {
     config_path : Option<OsString>,
     message_level : Option<u8>,
 }
-
-
 
 impl ConfigManager {
 
@@ -81,7 +77,6 @@ impl ConfigManager {
         if message_level.is_err() {
             return Err(anyhow!("Incorrect message level. Correct input is a number in range 0-2."));
         }
-
 
         match &message_level.as_ref().unwrap() {
             0 => (),
@@ -266,9 +261,11 @@ impl ConfigManager {
 
 
     fn change_bg_image(&mut self, path_to_img : &OsString) -> anyhow::Result<()> {
+        self.log_debug(&format!("New image path: {}", path_to_img.clone().to_string_lossy().into_owned()));
+
         let abs_path_result = omnipath::sys_absolute(path_to_img.as_ref());
 
-        self.log_debug(&format!("New image path: {}", abs_path_result.as_ref().unwrap().to_string_lossy().into_owned()));
+        // self.log_debug(&format!("Applying new image opacity"));       
 
         if abs_path_result.is_err() || 
             fs::metadata( abs_path_result.as_ref().unwrap()).is_err() || 
@@ -281,6 +278,9 @@ impl ConfigManager {
     }
 
     fn change_bg_image_opacity(&mut self, opacity_argument : &String) -> anyhow::Result<()> {
+        // self.log_debug(&format!("Applying new image opacity"));       
+        self.log_debug(&format!("New image opacity: {}", &opacity_argument));       
+
         let opacity_value_result  = opacity_argument.clone().parse::<u8>();
 
         if opacity_value_result.is_err() {
@@ -293,12 +293,14 @@ impl ConfigManager {
             return Err(anyhow!("Incorrect image opacity value. Correct inputs in range 0-100"));
         }
 
-
         *self.get_json_property("backgroundImageOpacity") = ((opacity_value as f64) / 100.0).into();
         return Ok(());
     }
 
     fn change_bg_image_alignment(&mut self, aligment_type : &String) -> anyhow::Result<()> {
+        // self.log_debug(&format!("Applying new image alignment"));       
+        self.log_debug(&format!("New image alignment: {}", &aligment_type));       
+
         let alignment_types = coll::HashSet::from(["center", "left", "top", "right", "bottom", "topLeft", "topRight", "bottomLeft", "bottomRight"]);   
 
         if !alignment_types.contains(aligment_type.as_str()) {
@@ -310,6 +312,9 @@ impl ConfigManager {
     }
 
     fn change_bg_image_stretch_mode(&mut self, stretch_mode : &String) -> anyhow::Result<()> {
+        // self.log_debug(&format!("Applying new image stretch mode"));       
+        self.log_debug(&format!("New image stretch mode: {}", &stretch_mode));       
+
         let stretch_modes = coll::HashSet::from(["none", "fill", "uniform", "uniformToFill"]);
 
         if !stretch_modes.contains(stretch_mode.as_str()) {
@@ -321,6 +326,8 @@ impl ConfigManager {
     }
 
     fn change_term_opacity(&mut self, opacity_argument : &String) -> anyhow::Result<()> {
+        self.log_debug(&format!("New terminal opacity: {}", &opacity_argument));       
+
         let opacity_value_result  = opacity_argument.clone().parse::<u8>();
 
         if opacity_value_result.is_err() {
@@ -358,26 +365,18 @@ impl ConfigManager {
 }
 
 
+static STRETCH_POSSIBLE_VALUES: [&str; 4] = ["none", "fill", "uniform", "uniformToFill"];
+static ALIGN_POSSIBLE_VALUES: [&str; 9] = ["center", "left", "top", "right", "bottom", "topLeft", "topRight", "bottomLeft", "bottomRight"];
+static MESSAGE_POSSIBLE_VALUES: [&str; 3] = ["0", "1", "2"];
+static VERSION_POSSIBLE_VALUES: [&str; 6] = ["preview", "p", "stable", "s", "unpackaged", "u"];
+
+
 // Arg parser struct
 #[derive(Parser)]
 #[command(version, about = "Tool for setting background image properties and terminal opacity for Windows Terminal. Updates 'default' property in configuration JSON.", long_about = None, arg_required_else_help = true)]
 pub struct Cli {
-    // /// Optional name to operate on
-    // name: Option<String>,
-
-    // /// Sets a custom config file
-    // #[arg(short, long, value_name = "FILE")]
-    // config: Option<PathBuf>,
-
-    // /// Turn debugging information on
-    // #[arg(short, long, action = clap::ArgAction::Count)]
-    // debug: u8,
-
-    // #[command(subcommand)]
-    // command: Option<Commands>,
-
-    /// Choose terminal version. Default will act on the first found. 
-    #[arg(short, long, action = clap::ArgAction::Append)]
+    /// Choose terminal version. None will cause the tool to work on the first found config. 
+    #[arg(short, long, action = clap::ArgAction::Append, value_parser = clap::builder::PossibleValuesParser::new(VERSION_POSSIBLE_VALUES))]
     pub terminal_version: Option<String>,
 
     /// Use image as background
@@ -389,24 +388,24 @@ pub struct Cli {
     // #[arg(short = 'r', long, action = clap::ArgAction::Append)]
     // random_image: Option<Vec<String>>,
 
-    /// Change opacity of the image (% value)
+    /// Change opacity of the image (% value 0-100)
     #[arg(short = 'o', long, action = clap::ArgAction::Append)]
     pub image_opacity: Option<String>,
 
-    /// Change alignment type of background image (% value)
-    #[arg(short, long, value_name = "ALIGNMENT_TYPE")]
+    /// Change alignment type of background image
+    #[arg(short, long, value_name = "ALIGNMENT_TYPE", value_parser = clap::builder::PossibleValuesParser::new(ALIGN_POSSIBLE_VALUES))]
     pub align: Option<String>,
 
     /// Change stretch mode of background image
-    #[arg(short, long, value_name = "STRETCH_MODE")]
+    #[arg(short, long, value_name = "STRETCH_MODE", value_parser = clap::builder::PossibleValuesParser::new(STRETCH_POSSIBLE_VALUES))]
     pub stretch: Option<String>,
 
-    /// Change opacity of the terminal
+    /// Change opacity of the terminal (% value 0-100)
     #[arg(short = 'O', long, action = clap::ArgAction::Append)]
     pub terminal_opacity: Option<String>,
 
     /// Set message level
-    #[arg(short, long, value_name = "LEVEL_VALUE")]
+    #[arg(short, long, value_name = "LEVEL_VALUE",  value_parser = clap::builder::PossibleValuesParser::new(MESSAGE_POSSIBLE_VALUES))]
     pub message_level:  Option<String>,
 }
 
