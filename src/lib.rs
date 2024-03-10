@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+// use std::collections::HashSet;
 use std::env;
 use std::collections as coll;
 use std::ffi::OsString;
@@ -23,6 +23,50 @@ pub enum TerminalVersion {
     Stable,
     Preview,
     Unpackaged,
+}
+
+
+static STRETCH_POSSIBLE_VALUES: [&str; 4] = ["none", "fill", "uniform", "uniformToFill"];
+static ALIGN_POSSIBLE_VALUES: [&str; 9] = ["center", "left", "top", "right", "bottom", "topLeft", "topRight", "bottomLeft", "bottomRight"];
+static MESSAGE_POSSIBLE_VALUES: [&str; 3] = ["0", "1", "2"];
+static VERSION_POSSIBLE_VALUES: [&str; 6] = ["preview", "p", "stable", "s", "unpackaged", "u"];
+
+
+#[derive(Parser)]
+#[command(version, about = "Tool for setting background image properties and terminal opacity for Windows Terminal. Updates 'default' property in configuration JSON.", long_about = None, arg_required_else_help = true)]
+pub struct Cli {
+    /// Choose terminal version. None will cause the tool to work on the first found config. 
+    #[arg(short, long, action = clap::ArgAction::Append, value_parser = clap::builder::PossibleValuesParser::new(VERSION_POSSIBLE_VALUES))]
+    pub terminal_version: Option<String>,
+
+    /// Use image as background
+    #[arg(short, long, value_name = "PATH_TO_IMAGE")]
+    pub path: Option<Option<PathBuf>>,
+
+    // /// Choose a random image from paths inputted or a folder
+    // doesnt work for mutliple args - parses first arg and throws error
+    // #[arg(short = 'r', long, action = clap::ArgAction::Append)]
+    // random_image: Option<Vec<String>>,
+
+    /// Change opacity of the image (% value 0-100)
+    #[arg(short = 'o', long, action = clap::ArgAction::Append)]
+    pub image_opacity: Option<String>,
+
+    /// Change alignment type of background image
+    #[arg(short, long, value_name = "ALIGNMENT_TYPE", value_parser = clap::builder::PossibleValuesParser::new(ALIGN_POSSIBLE_VALUES))]
+    pub align: Option<String>,
+
+    /// Change stretch mode of background image
+    #[arg(short, long, value_name = "STRETCH_MODE", value_parser = clap::builder::PossibleValuesParser::new(STRETCH_POSSIBLE_VALUES))]
+    pub stretch: Option<String>,
+
+    /// Change opacity of the terminal (% value 0-100)
+    #[arg(short = 'O', long, action = clap::ArgAction::Append)]
+    pub terminal_opacity: Option<String>,
+
+    /// Set message level
+    #[arg(short, long, value_name = "LEVEL_VALUE",  value_parser = clap::builder::PossibleValuesParser::new(MESSAGE_POSSIBLE_VALUES))]
+    pub message_level:  Option<String>,
 }
 
 
@@ -52,7 +96,7 @@ impl ConfigManager {
 
         self.handle_terminal_version(&cli.terminal_version.clone().into())?;
 
-        self.create_config_from_path(&self.config_path.clone().expect("config_path is None. It should have already data here."))?;
+        self.load_config_from_path(&self.config_path.clone().expect("config_path is None. It should have already data here."))?;
 
         // Handling of arguments for features
         self.execute_features(&cli)?;
@@ -80,8 +124,8 @@ impl ConfigManager {
 
         match &message_level.as_ref().unwrap() {
             0 => (),
-            1 => println!("Normal message mode is on"),
-            2 => println!("Debug message mode is on"),
+            1 => println!("Info message level is on"),
+            2 => println!("Debug message level is on"),
             _ => println!("Wrong message level. Using normal message mode."),
         }
 
@@ -92,12 +136,6 @@ impl ConfigManager {
 
 
     fn handle_terminal_version(&mut self, terminal_version : &Option<String>) -> anyhow::Result<()> {
-
-        // Choosing terminal version
-        // TODO would be good to somehow merge this with aliases for arg options to have one source of truth
-
-        // let current_version_and_path = parse_terminal_version_and_get_config_version_tuple(&cli)
-        
         let string_terminal_version : coll::HashMap< &str, TerminalVersion> = coll::HashMap::from([
             ("stable", TerminalVersion::Stable),
             ("preview", TerminalVersion::Preview),
@@ -107,15 +145,14 @@ impl ConfigManager {
             ("u", TerminalVersion::Unpackaged),
         ]);
 
-        let terminal_version_arguments : HashSet<&str> = FromIterator::from_iter(string_terminal_version.keys().cloned());
+        // let terminal_version_arguments : HashSet<&str> = FromIterator::from_iter(string_terminal_version.keys().cloned());
 
         let versions_to_paths_mapping: coll::BTreeMap<TerminalVersion, OsString> = self.prep_version_path_struct();
-
 
         match terminal_version {
             Some(v) => {
                 self.assign_path_and_version_for_specific_version(&string_terminal_version.get(v.as_str())
-                        .expect(format!("This version doesn't exist. Possible arguments: {:#?}", terminal_version_arguments).as_str()),
+                        .expect(format!("This version doesn't exist. Should already have sanitized terminal version argument by now.").as_str()),
                     &versions_to_paths_mapping)?
             },
             None => {
@@ -152,19 +189,19 @@ impl ConfigManager {
         return Ok(());
     }
         
-    fn create_config_from_string_data(&mut self, config_string_data : &String ) -> anyhow::Result<()> {
+    fn load_config_from_string_data(&mut self, config_string_data : &String ) -> anyhow::Result<()> {
         self.json_data = serde_json::from_str(config_string_data)?;
 
         return Ok(());
     }
 
-    fn create_config_from_path(&mut self, current_term_cfg_path : &OsString ) ->  anyhow::Result<()> {
+    fn load_config_from_path(&mut self, current_term_cfg_path : &OsString ) ->  anyhow::Result<()> {
         let string_data = fs::read_to_string(current_term_cfg_path.clone().into_string().unwrap());
             // .expect("Loading config file data failed.");
             
         // self.log_debug(&format!("Loading JSON config from path. JSON contents: {}", contents));
 
-        self.create_config_from_string_data(&string_data.unwrap())?;
+        self.load_config_from_string_data(&string_data.unwrap())?;
         return Ok(());
     }
     
@@ -248,7 +285,7 @@ impl ConfigManager {
         }
 
         if fs::metadata(&path.expect("specific_path should not be None here.")).is_err() {
-            return Err(anyhow!("A path to the terminal config could not be found. No such file."));
+            return Err(anyhow!("The config file for the terminal version specified doesn't exist."));
         }
 
         self.terminal_version = Some(version.clone());
@@ -365,50 +402,6 @@ impl ConfigManager {
 }
 
 
-static STRETCH_POSSIBLE_VALUES: [&str; 4] = ["none", "fill", "uniform", "uniformToFill"];
-static ALIGN_POSSIBLE_VALUES: [&str; 9] = ["center", "left", "top", "right", "bottom", "topLeft", "topRight", "bottomLeft", "bottomRight"];
-static MESSAGE_POSSIBLE_VALUES: [&str; 3] = ["0", "1", "2"];
-static VERSION_POSSIBLE_VALUES: [&str; 6] = ["preview", "p", "stable", "s", "unpackaged", "u"];
-
-
-// Arg parser struct
-#[derive(Parser)]
-#[command(version, about = "Tool for setting background image properties and terminal opacity for Windows Terminal. Updates 'default' property in configuration JSON.", long_about = None, arg_required_else_help = true)]
-pub struct Cli {
-    /// Choose terminal version. None will cause the tool to work on the first found config. 
-    #[arg(short, long, action = clap::ArgAction::Append, value_parser = clap::builder::PossibleValuesParser::new(VERSION_POSSIBLE_VALUES))]
-    pub terminal_version: Option<String>,
-
-    /// Use image as background
-    #[arg(short, long, value_name = "PATH_TO_IMAGE")]
-    pub path: Option<Option<PathBuf>>,
-
-    // /// Choose a random image from paths inputted or a folder
-    // doesnt work for mutliple args - parses first arg and throws error
-    // #[arg(short = 'r', long, action = clap::ArgAction::Append)]
-    // random_image: Option<Vec<String>>,
-
-    /// Change opacity of the image (% value 0-100)
-    #[arg(short = 'o', long, action = clap::ArgAction::Append)]
-    pub image_opacity: Option<String>,
-
-    /// Change alignment type of background image
-    #[arg(short, long, value_name = "ALIGNMENT_TYPE", value_parser = clap::builder::PossibleValuesParser::new(ALIGN_POSSIBLE_VALUES))]
-    pub align: Option<String>,
-
-    /// Change stretch mode of background image
-    #[arg(short, long, value_name = "STRETCH_MODE", value_parser = clap::builder::PossibleValuesParser::new(STRETCH_POSSIBLE_VALUES))]
-    pub stretch: Option<String>,
-
-    /// Change opacity of the terminal (% value 0-100)
-    #[arg(short = 'O', long, action = clap::ArgAction::Append)]
-    pub terminal_opacity: Option<String>,
-
-    /// Set message level
-    #[arg(short, long, value_name = "LEVEL_VALUE",  value_parser = clap::builder::PossibleValuesParser::new(MESSAGE_POSSIBLE_VALUES))]
-    pub message_level:  Option<String>,
-}
-
 
 #[cfg(test)]
 mod tests {
@@ -419,7 +412,7 @@ mod tests {
     fn get_path_to_test_json() -> String {
         let mut path = path::PathBuf::new();
         path.push(env::var_os("CARGO_MANIFEST_DIR").unwrap());
-        path.push("src");  //)  path.push(OsString::from("./src/test.json"));
+        path.push("src"); 
         path.push("test.json");
         return path.to_string_lossy().into_owned();
     }
@@ -428,7 +421,7 @@ mod tests {
         let mut cm = ConfigManager::new();
         let _ = cm.handle_message_level(&None);
         let _ = cm.handle_terminal_version(&None);
-        let _ = cm.create_config_from_path(&cm.config_path.clone().expect("config_path is None. It should have already data here."));
+        let _ = cm.load_config_from_path(&cm.config_path.clone().expect("config_path is None. It should have already data here."));
         return cm;
     }
 
@@ -516,13 +509,5 @@ mod tests {
         let res = cm.change_bg_image(&OsString::from(r#"sdlfk37vjx,./;'\[]-=!@#$%^&*()`~分かる"#));
         assert!(res.is_err());
     }
-
-
-
-
-    // #[test]
-    // fn update_config_for_path(){
-        
-    // }
 
 }
