@@ -2,11 +2,11 @@ use std::env;
 use std::collections as coll;
 use std::ffi::OsString;
 use std::fs;
+use std::path::PathBuf;
 
 use anyhow::Ok;
 use serde_json;
 use clap::Parser;
-use std::path::PathBuf;
 use omnipath;
 use anyhow::anyhow;
 
@@ -96,7 +96,7 @@ impl ConfigManager {
 
         self.load_config_from_path(&self.config_path.clone().expect("config_path is None. It should have already data here."))?;
 
-        // Handling of arguments for features
+        // Handling arguments for features
         self.execute_features(&cli)?;
 
         // Saving prettified string to JSON file
@@ -301,7 +301,7 @@ impl ConfigManager {
         if abs_path_result.is_err() || 
             fs::metadata( abs_path_result.as_ref().unwrap()).is_err() || 
             abs_path_result.as_ref().unwrap().as_os_str().len() == 0 {
-            return Err(anyhow!("Incorrect path. Path doesn't exist."));
+            return Err(anyhow!("Incorrect path. File doesn't exist."));
         }
 
         *self.get_json_property("backgroundImage") = abs_path_result.unwrap().to_string_lossy().into();
@@ -332,6 +332,7 @@ impl ConfigManager {
 
         let alignment_types = coll::HashSet::from(ALIGN_POSSIBLE_VALUES.clone());   
 
+        // This error is not used right now as the validation is being done by CLI interface
         if !alignment_types.contains(aligment_type.as_str()) {
             return Err(anyhow!("Incorrect aligment type. Possible types: {:#?}", &ALIGN_POSSIBLE_VALUES));
         }
@@ -345,7 +346,7 @@ impl ConfigManager {
 
         let stretch_modes = coll::HashSet::from(STRETCH_POSSIBLE_VALUES.clone());
 
-        // This error is not used right now as the validation is being done 
+        // This error is not used right now as the validation is being done by CLI interface
         if !stretch_modes.contains(stretch_mode.as_str()) {
             return Err(anyhow!("Incorrect stretch mode. Possible types: {:#?}", &STRETCH_POSSIBLE_VALUES));
         }
