@@ -1,4 +1,3 @@
-// use std::collections::HashSet;
 use std::env;
 use std::collections as coll;
 use std::ffi::OsString;
@@ -18,7 +17,6 @@ use anyhow::anyhow;
 #[derive(Eq)]
 #[derive(Debug)]
 #[derive(Clone)]
-// #[derive(strum_macros::Display)]
 pub enum TerminalVersion {
     Stable,
     Preview,
@@ -145,8 +143,6 @@ impl ConfigManager {
             ("u", TerminalVersion::Unpackaged),
         ]);
 
-        // let terminal_version_arguments : HashSet<&str> = FromIterator::from_iter(string_terminal_version.keys().cloned());
-
         let versions_to_paths_mapping: coll::BTreeMap<TerminalVersion, OsString> = self.prep_version_path_struct();
 
         match terminal_version {
@@ -250,7 +246,7 @@ impl ConfigManager {
     fn assign_path_and_version_for_any_version(&mut self, term_versions_paths : &coll::BTreeMap<TerminalVersion, OsString>) -> anyhow::Result<()> {
         let mut path_found_result = Err(anyhow!("No windows terminal config file found."));
 
-        // Searching for a valid path and assigning it
+        // Searching for any valid path and assigning it for later usage
         for file_path in term_versions_paths{
             match fs::metadata(file_path.1) {
                 std::result::Result::Ok(_) => {
@@ -302,8 +298,6 @@ impl ConfigManager {
 
         let abs_path_result = omnipath::sys_absolute(path_to_img.as_ref());
 
-        // self.log_debug(&format!("Applying new image opacity"));       
-
         if abs_path_result.is_err() || 
             fs::metadata( abs_path_result.as_ref().unwrap()).is_err() || 
             abs_path_result.as_ref().unwrap().as_os_str().len() == 0 {
@@ -315,7 +309,6 @@ impl ConfigManager {
     }
 
     fn change_bg_image_opacity(&mut self, opacity_argument : &String) -> anyhow::Result<()> {
-        // self.log_debug(&format!("Applying new image opacity"));       
         self.log_debug(&format!("New image opacity: {}", &opacity_argument));       
 
         let opacity_value_result  = opacity_argument.clone().parse::<u8>();
@@ -335,13 +328,12 @@ impl ConfigManager {
     }
 
     fn change_bg_image_alignment(&mut self, aligment_type : &String) -> anyhow::Result<()> {
-        // self.log_debug(&format!("Applying new image alignment"));       
         self.log_debug(&format!("New image alignment: {}", &aligment_type));       
 
-        let alignment_types = coll::HashSet::from(["center", "left", "top", "right", "bottom", "topLeft", "topRight", "bottomLeft", "bottomRight"]);   
+        let alignment_types = coll::HashSet::from(ALIGN_POSSIBLE_VALUES.clone());   
 
         if !alignment_types.contains(aligment_type.as_str()) {
-            return Err(anyhow!("Incorrect aligment type. Possible types: {:#?}", alignment_types));
+            return Err(anyhow!("Incorrect aligment type. Possible types: {:#?}", &ALIGN_POSSIBLE_VALUES));
         }
 
         *self.get_json_property("backgroundImageAlignment") = aligment_type.clone().into();
@@ -349,13 +341,13 @@ impl ConfigManager {
     }
 
     fn change_bg_image_stretch_mode(&mut self, stretch_mode : &String) -> anyhow::Result<()> {
-        // self.log_debug(&format!("Applying new image stretch mode"));       
         self.log_debug(&format!("New image stretch mode: {}", &stretch_mode));       
 
-        let stretch_modes = coll::HashSet::from(["none", "fill", "uniform", "uniformToFill"]);
+        let stretch_modes = coll::HashSet::from(STRETCH_POSSIBLE_VALUES.clone());
 
+        // This error is not used right now as the validation is being done 
         if !stretch_modes.contains(stretch_mode.as_str()) {
-            return Err(anyhow!("Incorrect stretch mode. Possible types: {:#?}", stretch_modes));
+            return Err(anyhow!("Incorrect stretch mode. Possible types: {:#?}", &STRETCH_POSSIBLE_VALUES));
         }
         
         *self.get_json_property("backgroundImageStretchMode") = stretch_mode.clone().into();
@@ -408,7 +400,6 @@ mod tests {
     use super::*;
     use std::path;
 
-    // Will use this method for inputting a path to image for now
     fn get_path_to_test_json() -> String {
         let mut path = path::PathBuf::new();
         path.push(env::var_os("CARGO_MANIFEST_DIR").unwrap());

@@ -1,5 +1,5 @@
 fn main() -> anyhow::Result<()> {
-    let mut _config_manager = wtpw::ConfigManager::new().exec()?;
+    wtw::ConfigManager::new().exec()?;
 
     Ok(())
 }
